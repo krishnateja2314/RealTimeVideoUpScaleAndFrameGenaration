@@ -1,0 +1,4 @@
+torch-directml
+torchvision
+pillow
+tqdm
