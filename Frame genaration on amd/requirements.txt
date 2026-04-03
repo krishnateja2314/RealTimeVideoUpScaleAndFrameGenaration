@@ -1,4 +1,6 @@
-torch-directml
+torch
 torchvision
 pillow
 tqdm
+onnx
+onnxruntime

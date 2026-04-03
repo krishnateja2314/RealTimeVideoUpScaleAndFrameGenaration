@@ -3,3 +3,6 @@ data/
 __pycache__/
 test/
 output.png
+*.onnx*
+model.pth
+output_onnx.png
