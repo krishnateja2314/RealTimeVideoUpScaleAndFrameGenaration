@@ -1,106 +1,68 @@
 import torch
-import torch_directml
+import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
-from multiprocessing import freeze_support
-import time
-
 from dataset import VimeoDataset
-from model import InterpolationModel
+from model import FlowNet
 
-# ----------------------------
-# Paths
-# ----------------------------
-DATA_ROOT = "data/vimeo_triplet/sequences"
-TRAIN_LIST = "data/vimeo_triplet/tri_trainlist.txt"
+# Charbonnier Loss (Better than L1 for edges)
+class CharbonnierLoss(nn.Module):
+    def __init__(self, eps=1e-3):
+        super(CharbonnierLoss, self).__init__()
+        self.eps = eps
 
+    def forward(self, x, y):
+        diff = x - y
+        loss = torch.mean(torch.sqrt(diff * diff + self.eps * self.eps))
+        return loss
+
+# Laplacian Pyramid Loss (Focuses on sharpness)
+class LapLoss(nn.Module):
+    def __init__(self):
+        super(LapLoss, self).__init__()
+        self.kernel = torch.tensor([[1, 4, 6, 4, 1], [4, 16, 24, 16, 4], [6, 24, 36, 24, 6], 
+                                    [4, 16, 24, 16, 4], [1, 4, 6, 4, 1]]).float() / 256.0
+        self.kernel = self.kernel.view(1, 1, 5, 5).repeat(3, 1, 1, 1)
+
+    def pyramid(self, x):
+        padding = 2
+        low = F.conv2d(x, self.kernel.to(x.device), padding=padding, groups=3)
+        return x - low
+
+    def forward(self, x, y):
+        return F.l1_loss(self.pyramid(x), self.pyramid(y))
 
 def main():
-    print("Starting training...")
+    device = torch.device('cuda')
+    DATA_ROOT = "/run/media/krishnateja/Coding/Courses/ml for physics/Project/amd/data/vimeo_triplet/sequences"
+    TRAIN_LIST = "/run/media/krishnateja/Coding/Courses/ml for physics/Project/amd/data/vimeo_triplet/tri_trainlist.txt"
 
-    # ----------------------------
-    # Device (AMD GPU via DirectML)
-    # ----------------------------
-    device = torch_directml.device()
-    print("Using device:", device)
-
-    # ----------------------------
-    # Dataset
-    # ----------------------------
     dataset = VimeoDataset(DATA_ROOT, TRAIN_LIST)
+    loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=6, pin_memory=True)
 
-    loader = DataLoader(
-        dataset,
-        batch_size=8,
-        shuffle=True,
-        num_workers=0,   # 🔥 safest + avoids all Windows issues
-        pin_memory=False
-    )
+    model = FlowNet().to(device)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
+    
+    criterion_pixel = CharbonnierLoss().to(device)
+    criterion_lap = LapLoss().to(device)
 
-    # ----------------------------
-    # Model
-    # ----------------------------
-    model = InterpolationModel().to(device)
-
-    # ----------------------------
-    # Optimizer (SGD → no CPU fallback)
-    # ----------------------------
-    optimizer = torch.optim.Adam(model.parameters(), lr=5e-5)
-
-    # ----------------------------
-    # Training Loop
-    # ----------------------------
-    for epoch in range(10):
-        print(f"\nEpoch {epoch}")
-
+    for epoch in range(30):
         for i, (im1, im3, im2) in enumerate(loader):
-            im1 = im1.to(device)
-            im3 = im3.to(device)
-            im2 = im2.to(device)
-
-            # ----------------------------
-            # Forward + timing
-            # ----------------------------
-            start_time = time.time()
+            im1, im3, im2 = im1.to(device), im3.to(device), im2.to(device)
 
             pred = model(im1, im3)
-
-            inference_time = time.time() - start_time
-
-            # ----------------------------
-            # Loss
-            # ----------------------------
-            loss = torch.mean(torch.abs(pred - im2))
-
-            # ----------------------------
-            # Backprop
-            # ----------------------------
+            
+            # Combine losses: Pixel-wise + Sharpness
+            loss = criterion_pixel(pred, im2) + (0.5 * criterion_lap(pred, im2))
+            
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
-            # ----------------------------
-            # Logs
-            # ----------------------------
             if i % 100 == 0:
-                print(
-                    f"Step {i} | "
-                    f"Loss: {loss.item():.6f} | "
-                    f"Time: {inference_time:.4f}s | "
-                    f"Device: {im1.device}"
-                )
+                print(f"Epoch {epoch} | Step {i} | Loss: {loss.item():.4f}")
 
-        # ----------------------------
-        # Save model
-        # ----------------------------
         torch.save(model.state_dict(), "model.pth")
-        print("Model saved!")
 
-    print("Training finished!")
-
-
-# ----------------------------
-# Windows fix (IMPORTANT)
-# ----------------------------
 if __name__ == "__main__":
-    freeze_support()
     main()
