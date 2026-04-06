@@ -1,43 +1,35 @@
 import torch
 import torch.nn as nn
 
-class ResidualBlock(nn.Module):
-    def __init__(self, n_feats, res_scale=0.1):
+class FastResidualBlock(nn.Module):
+    def __init__(self, channels):
         super().__init__()
-        self.res_scale = res_scale
+        self.res_scale = 0.1 
         self.body = nn.Sequential(
-            nn.Conv2d(n_feats, n_feats, 3, padding=1),
-            nn.ReLU(),
-            nn.Conv2d(n_feats, n_feats, 3, padding=1)
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False),
+            nn.PReLU(),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1, bias=False)
         )
     def forward(self, x): 
         return x + self.body(x) * self.res_scale
 
-class Upscaler(nn.Module):
-    def __init__(self, scale=4):
+class UltraFastUpscaler(nn.Module):
+    def __init__(self):
         super().__init__()
-        self.head = nn.Conv2d(3, 64, 3, padding=1)
-        self.body = nn.Sequential(*[ResidualBlock(64) for _ in range(8)])
-        self.upsample = nn.Sequential(
-            nn.Conv2d(64, 64 * (2**2), 3, padding=1),
-            nn.PixelShuffle(2),
-            nn.Conv2d(64, 64 * (2**2), 3, padding=1),
-            nn.PixelShuffle(2)
-        )
-        self.tail = nn.Conv2d(64, 3, 3, padding=1)
+        # 1. Feature Extraction: NOW ACCEPTS 21 CHANNELS (7 frames * RGB)
+        self.head = nn.Conv2d(21, 32, kernel_size=3, padding=1)
         
-        # Initialize weights properly to prevent NaN explosions
-        self._initialize_weights()
-
-    def _initialize_weights(self):
-        for m in self.modules():
-            if isinstance(m, nn.Conv2d):
-                nn.init.kaiming_normal_(m.weight, mode='fan_out')
-                if m.bias is not None:
-                    nn.init.constant_(m.bias, 0)
+        # 2. AI Processing
+        self.body = nn.Sequential(*[FastResidualBlock(32) for _ in range(3)])
+        
+        # 3. Fixed AI Upscale (PixelShuffle directly to 4x)
+        self.upsample = nn.Sequential(
+            nn.Conv2d(32, 48, kernel_size=3, padding=1),
+            nn.PixelShuffle(4) 
+        )
 
     def forward(self, x):
-        x = self.head(x)
-        res = self.body(x)
-        x = self.upsample(x + res)
-        return self.tail(x)
+        features = self.head(x)
+        features = features + self.body(features)
+        out_4x = self.upsample(features)
+        return out_4x
