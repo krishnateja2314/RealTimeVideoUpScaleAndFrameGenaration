@@ -1,93 +1,90 @@
-import torch
-from PIL import Image
-import torchvision.transforms as T
-import matplotlib.pyplot as plt
 import os
-import sys
-from model import Upscaler
+import random
+import torch
+import torchvision.transforms as transforms
+from PIL import Image
+import matplotlib.pyplot as plt
 
-# --- CONFIGURATION ---
-# --- CONFIGURATION ---
-# Add the 'r' before the quotes!
-MODEL_PATH = r"D:\RealTimeVideoUpScaleAndFrameGenaration\upscaler_epoch10.pth" 
+from model import FSRCNN
 
-TEST_IMAGE = r"D:\vimeo_super_resolution_test\vimeo_super_resolution_test\input\00014\0855\im1.png"
-     # Image you want to upscale
-OUTPUT_PATH = r"D:\RealTimeVideoUpScaleAndFrameGenaration\output_upscaled2.png"       # Where to save the result
+# -----------------------------
+# SETTINGS
+# -----------------------------
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
-# --- LOAD MODEL ---
-print(f"Loading model from {MODEL_PATH}...")
+MODEL_PATH = r"D:\RealTimeVideoUpScaleAndFrameGenaration\image upscaling nvidia\fsrcnn.pth"
 
-if not os.path.exists(MODEL_PATH):
-    print(f"❌ Model file not found at {MODEL_PATH}")
-    print("Make sure training is complete and the .pth file exists!")
-    sys.exit()
+HR_DIR = r"D:\DIV2K\DIV2K_train_HR"
+LR_DIR = r"D:\DIV2K\X4"
 
-model = Upscaler().to(DEVICE)
+SAVE_OUTPUT = "output_sr.png"
+
+# -----------------------------
+# LOAD MODEL
+# -----------------------------
+model = FSRCNN().to(DEVICE)
 model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
 model.eval()
-print("✅ Model loaded successfully!")
 
-# --- LOAD TEST IMAGE ---
-print(f"Loading test image from {TEST_IMAGE}...")
+print("✅ Model loaded")
 
-if not os.path.exists(TEST_IMAGE):
-    print(f"❌ Test image not found at {TEST_IMAGE}")
-    print("Put any image in the same folder and update TEST_IMAGE variable!")
-    sys.exit()
+# -----------------------------
+# PICK RANDOM IMAGE
+# -----------------------------
+lr_images = os.listdir(LR_DIR)
+lr_name = random.choice(lr_images)
 
-img = Image.open(TEST_IMAGE).convert('RGB')
-original_width, original_height = img.size
-print(f"✅ Image loaded! Original size: {original_width} x {original_height}")
+# match HR filename
+hr_name = lr_name.replace("x4", "")
 
-# --- PREPARE IMAGE ---
-to_tensor = T.ToTensor()
-to_image = T.ToPILImage()
+lr_path = os.path.join(LR_DIR, lr_name)
+hr_path = os.path.join(HR_DIR, hr_name)
 
-# Convert to tensor and clamp
-img_tensor = to_tensor(img).clamp(0, 1)
+print("Testing image:", lr_name)
 
-# Add batch dimension and send to GPU
-img_tensor = img_tensor.unsqueeze(0).to(DEVICE)
+# -----------------------------
+# LOAD IMAGES
+# -----------------------------
+transform = transforms.ToTensor()
 
-# --- RUN UPSCALER ---
-print("🚀 Running upscaler...")
+lr_img = Image.open(lr_path).convert("RGB")
+hr_img = Image.open(hr_path).convert("RGB")
 
+lr_tensor = transform(lr_img).unsqueeze(0).to(DEVICE)
+
+# -----------------------------
+# INFERENCE
+# -----------------------------
 with torch.no_grad():
-    output = model(img_tensor)
-    output = output.clamp(0, 1)
+    sr_tensor = model(lr_tensor)
 
-# --- PROCESS OUTPUT ---
-# Remove batch dimension and move to CPU
-output = output.squeeze(0).cpu()
+sr_tensor = sr_tensor.squeeze(0).cpu().clamp(0, 1)
 
-# Convert back to PIL image
-output_img = to_image(output)
-new_width, new_height = output_img.size
-print(f"✅ Upscaling complete!")
-print(f"Input size:  {original_width} x {original_height}")
-print(f"Output size: {new_width} x {new_height}")
-print(f"Scale factor: {new_width // original_width}x")
+to_pil = transforms.ToPILImage()
+sr_img = to_pil(sr_tensor)
 
-# --- SAVE OUTPUT ---
-output_img.save(OUTPUT_PATH)
-print(f"💾 Saved upscaled image to {OUTPUT_PATH}")
+# save result
+sr_img.save(SAVE_OUTPUT)
+print("✅ Saved SR image:", SAVE_OUTPUT)
 
-# --- DISPLAY COMPARISON ---
-fig, axes = plt.subplots(1, 2, figsize=(14, 7))
+# -----------------------------
+# VISUALIZE RESULTS
+# -----------------------------
+plt.figure(figsize=(15,5))
 
-axes[0].imshow(img)
-axes[0].set_title(f"Original\n{original_width} x {original_height}", fontsize=14)
-axes[0].axis('off')
+plt.subplot(1,3,1)
+plt.title("Low Resolution")
+plt.imshow(lr_img)
+plt.axis("off")
 
-axes[1].imshow(output_img)
-axes[1].set_title(f"Upscaled by AI\n{new_width} x {new_height}", fontsize=14)
-axes[1].axis('off')
+plt.subplot(1,3,2)
+plt.title("Super Resolution (Model)")
+plt.imshow(sr_img)
+plt.axis("off")
 
-plt.suptitle("Super Resolution Result", fontsize=16, fontweight='bold')
-plt.tight_layout()
-plt.savefig("comparison.png")
+plt.subplot(1,3,3)
+plt.title("Ground Truth HR")
+plt.imshow(hr_img)
+plt.axis("off")
+
 plt.show()
-
-print("✅ Comparison saved as comparison.png")

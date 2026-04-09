@@ -1,58 +1,46 @@
 import os
 from PIL import Image
-import torch
 from torch.utils.data import Dataset
-import torchvision.transforms as T
+import torchvision.transforms as transforms
+import random
 
-class VimeoDataset(Dataset):
-    def __init__(self, root_dir, list_file):
-        self.root_dir = root_dir
-        
-        with open(list_file, 'r', encoding='utf-8') as f:
-            all_folders = [line.strip() for line in f if line.strip()]
-        
-        self.samples = []
-        print(f"Scanning {root_dir} for 7-frame sequences...")
+class DIV2KDataset(Dataset):
+    def __init__(self, hr_dir, lr_dir, patch_size=48):
+        self.hr_dir = hr_dir
+        self.lr_dir = lr_dir
+        self.patch_size = patch_size
 
-        for folder in all_folders:
-            clean_folder = folder.replace('/', os.sep).replace('\\', os.sep)
-            
-            # Check if all 7 low-res frames and the target high-res im4 exist
-            valid = True
-            for i in range(1, 8):
-                lr_path = os.path.join(self.root_dir, 'low_resolution', clean_folder, f"im{i}.png")
-                if not os.path.exists(lr_path):
-                    valid = False
-                    break
-            hr_path = os.path.join(self.root_dir, 'target', clean_folder, "im4.png")
-            if not os.path.exists(hr_path):
-                valid = False
-            
-            if valid:
-                self.samples.append(clean_folder)
-        
-        print(f"✅ VSR Dataset ready! Found {len(self.samples)} valid sequences.")
+        self.hr_images = sorted(os.listdir(hr_dir))
+
+        self.to_tensor = transforms.ToTensor()
 
     def __len__(self):
-        return len(self.samples)
+        return len(self.hr_images)
 
     def __getitem__(self, idx):
-        folder = self.samples[idx]
-        to_tensor = T.ToTensor()
-        
-        # Load all 7 low-res frames
-        lr_frames = []
-        for i in range(1, 8):
-            lr_path = os.path.join(self.root_dir, 'low_resolution', folder, f"im{i}.png")
-            img = Image.open(lr_path).convert('RGB')
-            lr_frames.append(to_tensor(img))
-            
-        # Stack them into a single tensor with 21 channels (7 frames * 3 colors)
-        lr_tensor = torch.cat(lr_frames, dim=0)
 
-        # Load ONLY the target hr im4.png
-        hr_path = os.path.join(self.root_dir, 'target', folder, "im4.png")
-        hr_img = Image.open(hr_path).convert('RGB')
-        hr_tensor = to_tensor(hr_img)
+        hr_name = self.hr_images[idx]
+        lr_name = hr_name.replace(".png", "x4.png")
 
-        return lr_tensor, hr_tensor
+        hr_path = os.path.join(self.hr_dir, hr_name)
+        lr_path = os.path.join(self.lr_dir, lr_name)
+
+        hr = Image.open(hr_path).convert("RGB")
+        lr = Image.open(lr_path).convert("RGB")
+
+        # ---- Random Patch Cropping ----
+        lr_w, lr_h = lr.size
+        x = random.randint(0, lr_w - self.patch_size)
+        y = random.randint(0, lr_h - self.patch_size)
+
+        lr_patch = lr.crop((x, y, x+self.patch_size, y+self.patch_size))
+
+        scale = 4
+        hr_patch = hr.crop((
+            x*scale,
+            y*scale,
+            (x+self.patch_size)*scale,
+            (y+self.patch_size)*scale
+        ))
+
+        return self.to_tensor(lr_patch), self.to_tensor(hr_patch)
