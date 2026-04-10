@@ -5,7 +5,8 @@ import torch.optim as optim
 from tqdm import tqdm
 
 from dataset import DIV2KDataset
-from model import FSRCNN
+from model import ESPCN
+model = ESPCN(scale_factor=4)
 
 # -------------------------
 # Device
@@ -62,20 +63,23 @@ def main():
     # Dataset
     dataset = DIV2KDataset(HR_DIR, LR_DIR)
 
-    loader = DataLoader(
-        dataset,
-        batch_size=16,
-        shuffle=True,
-        num_workers=4
-    )
+# 🔍 DEBUG CHECK (add this)
+    lr, hr = dataset[0]
+    print("LR shape:", lr.shape)
+    print("HR shape:", hr.shape)
+
+# Then continue normally
+    loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=4)
+
+   
 
     # Model
-    model = FSRCNN().to(device)
+    model = ESPCN(scale_factor=4).to(device)
 
     criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=1e-4)
 
-    epochs = 50
+    epochs = 100
     best_loss = float("inf")
 
     for epoch in range(epochs):
@@ -87,7 +91,7 @@ def main():
         # Save best model
         if avg_loss < best_loss:
             best_loss = avg_loss
-            torch.save(model.state_dict(), "fsrcnn.pth")
+            torch.save(model.state_dict(), "espcn.pth")
             print("✅ Model Saved")
 
 

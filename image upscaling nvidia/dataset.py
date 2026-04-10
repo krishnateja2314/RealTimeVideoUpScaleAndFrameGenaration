@@ -1,46 +1,64 @@
 import os
-from PIL import Image
-from torch.utils.data import Dataset
-import torchvision.transforms as transforms
 import random
+import torch
+from torch.utils.data import Dataset
+from PIL import Image
+import numpy as np
+
 
 class DIV2KDataset(Dataset):
-    def __init__(self, hr_dir, lr_dir, patch_size=48):
+    def __init__(self, hr_dir, lr_dir, patch_size=48, scale=4):
         self.hr_dir = hr_dir
         self.lr_dir = lr_dir
         self.patch_size = patch_size
+        self.scale = scale
 
+        # Get HR filenames
         self.hr_images = sorted(os.listdir(hr_dir))
-
-        self.to_tensor = transforms.ToTensor()
 
     def __len__(self):
         return len(self.hr_images)
 
     def __getitem__(self, idx):
 
+        # -----------------------------
+        # File names
+        # -----------------------------
         hr_name = self.hr_images[idx]
-        lr_name = hr_name.replace(".png", "x4.png")
+        lr_name = hr_name.replace(".png", f"x{self.scale}.png")
 
         hr_path = os.path.join(self.hr_dir, hr_name)
         lr_path = os.path.join(self.lr_dir, lr_name)
 
+        # -----------------------------
+        # Load images
+        # -----------------------------
         hr = Image.open(hr_path).convert("RGB")
         lr = Image.open(lr_path).convert("RGB")
 
-        # ---- Random Patch Cropping ----
-        lr_w, lr_h = lr.size
-        x = random.randint(0, lr_w - self.patch_size)
-        y = random.randint(0, lr_h - self.patch_size)
+        hr = np.array(hr)
+        lr = np.array(lr)
 
-        lr_patch = lr.crop((x, y, x+self.patch_size, y+self.patch_size))
+        # -----------------------------
+        # Random Crop (VERY IMPORTANT)
+        # -----------------------------
+        h, w, _ = lr.shape
 
-        scale = 4
-        hr_patch = hr.crop((
-            x*scale,
-            y*scale,
-            (x+self.patch_size)*scale,
-            (y+self.patch_size)*scale
-        ))
+        ps = self.patch_size
 
-        return self.to_tensor(lr_patch), self.to_tensor(hr_patch)
+        x = random.randint(0, w - ps)
+        y = random.randint(0, h - ps)
+
+        lr_patch = lr[y:y+ps, x:x+ps]
+        hr_patch = hr[
+            y*self.scale:(y+ps)*self.scale,
+            x*self.scale:(x+ps)*self.scale
+        ]
+
+        # -----------------------------
+        # Convert to tensor
+        # -----------------------------
+        lr_patch = torch.from_numpy(lr_patch).permute(2, 0, 1).float() / 255.0
+        hr_patch = torch.from_numpy(hr_patch).permute(2, 0, 1).float() / 255.0
+
+        return lr_patch, hr_patch
