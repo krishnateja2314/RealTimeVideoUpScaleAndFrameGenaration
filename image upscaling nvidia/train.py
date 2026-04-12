@@ -1,105 +1,70 @@
 import torch
-from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.optim as optim
-from tqdm import tqdm
-
-from dataset import DIV2KDataset
+from torch.utils.data import DataLoader
+from dataset import VimeoDataset
 from model import ESPCN
-model = ESPCN(scale_factor=4)
 
-# -------------------------
-# Device
-# -------------------------
-device = "cuda" if torch.cuda.is_available() else "cpu"
+# ==============================================================================
+# ⚠️ PATHS: ADD YOUR SPECIFIC DIRECTORIES HERE ⚠️
+# ==============================================================================
+# Point this to the folder containing BOTH 'low_resolution' and 'target' folders
+TRAIN_DATA_ROOT = r"D:\vimeo_super_resolution_test" 
+SAVE_MODEL_PATH = "espcn_vimeo_final.pth"
+# ==============================================================================
 
-# Paths
-HR_DIR = r"D:\DIV2K\DIV2K_train_HR"
-LR_DIR = r"D:\DIV2K\X4"
+# Hyperparameters
+BATCH_SIZE = 16  # Keep this low (8 or 16) so you don't crash your 4GB RTX 3050 VRAM
+NUM_EPOCHS = 10
+LEARNING_RATE = 0.001
 
+def train():
+    # 1. Setup Device (Forces PyTorch to use your RTX 3050)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    print(f"Training on device: {device}")
 
-# -------------------------
-# Train One Batch
-# -------------------------
-def train_step(lr, hr, model, optimizer, criterion):
+    # 2. Load Dataset
+    print("Loading dataset...")
+    train_dataset = VimeoDataset(root_dir=TRAIN_DATA_ROOT)
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=4)
+    print(f"Found {len(train_dataset)} image pairs.")
 
-    lr = lr.to(device)
-    hr = hr.to(device)
-
-    sr = model(lr)
-    loss = criterion(sr, hr)
-
-    optimizer.zero_grad()
-    loss.backward()
-    optimizer.step()
-
-    return loss.item()
-
-
-# -------------------------
-# Train One Epoch
-# -------------------------
-def train_epoch(loader, model, optimizer, criterion, epoch):
-
-    model.train()
-    loop = tqdm(loader, desc=f"Epoch {epoch+1}")
-
-    total_loss = 0
-
-    for lr, hr in loop:
-        loss = train_step(lr, hr, model, optimizer, criterion)
-
-        total_loss += loss
-        loop.set_postfix(loss=loss)
-
-    return total_loss / len(loader)
-
-
-# -------------------------
-# Main Function
-# -------------------------
-def main():
-
-    # Dataset
-    dataset = DIV2KDataset(HR_DIR, LR_DIR)
-
-# 🔍 DEBUG CHECK (add this)
-    lr, hr = dataset[0]
-    print("LR shape:", lr.shape)
-    print("HR shape:", hr.shape)
-
-# Then continue normally
-    loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=4)
-
-   
-
-    # Model
+    # 3. Initialize Model, Loss (L1 generally yields sharper SR results), and Optimizer
     model = ESPCN(scale_factor=4).to(device)
+    criterion = nn.L1Loss() 
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
-    criterion = nn.L1Loss()
-    optimizer = optim.Adam(model.parameters(), lr=1e-4)
+    # 4. Training Loop
+    model.train()
+    for epoch in range(NUM_EPOCHS):
+        epoch_loss = 0.0
+        
+        for batch_idx, (lr_imgs, hr_imgs) in enumerate(train_loader):
+            # Move images to the RTX 3050
+            lr_imgs = lr_imgs.to(device)
+            hr_imgs = hr_imgs.to(device)
 
-    epochs = 100
-    best_loss = float("inf")
+            # Forward pass
+            outputs = model(lr_imgs)
+            loss = criterion(outputs, hr_imgs)
 
-    for epoch in range(epochs):
+            # Backward pass and optimize
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        avg_loss = train_epoch(loader, model, optimizer, criterion, epoch)
+            epoch_loss += loss.item()
 
-        print(f"Epoch {epoch+1} Avg Loss: {avg_loss:.4f}")
+            # Print progress every 100 batches
+            if batch_idx % 100 == 0:
+                print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] Batch [{batch_idx}/{len(train_loader)}] Loss: {loss.item():.6f}")
 
-        # Save best model
-        if avg_loss < best_loss:
-            best_loss = avg_loss
-            torch.save(model.state_dict(), "espcn.pth")
-            print("✅ Model Saved")
+        # Average loss for the epoch
+        print(f"--- Epoch {epoch+1} Completed | Average Loss: {epoch_loss/len(train_loader):.6f} ---")
 
+        # Save the model after every epoch
+        torch.save(model.state_dict(), SAVE_MODEL_PATH)
+        print(f"Model saved to {SAVE_MODEL_PATH}")
 
-    print("Training finished!")
-
-
-# -------------------------
-# Entry Point
-# -------------------------
 if __name__ == "__main__":
-    main()
+    train()
