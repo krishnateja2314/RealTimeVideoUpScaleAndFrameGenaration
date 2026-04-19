@@ -1,8 +1,8 @@
 import torch
-from model import FlowNet
+from model import InterpolationModel
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-model = FlowNet().to(device)
+model = InterpolationModel().to(device)
 model.load_state_dict(torch.load("model.pth", map_location=device))
 model.eval()
 

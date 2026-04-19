@@ -4,5 +4,6 @@ __pycache__/
 test/
 output.png
 *.onnx*
+models/
 model.pth
 output_onnx.png
