@@ -1,7 +1,10 @@
 venv/
+upscale_venv/
 data/
+*.png
 __pycache__/
 test/
+*.pth
 output.png
 *.onnx*
 models/
