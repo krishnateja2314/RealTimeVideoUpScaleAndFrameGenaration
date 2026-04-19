@@ -1,64 +1,53 @@
 import os
-import random
+import glob
+import random 
+from PIL import Image
 import torch
 from torch.utils.data import Dataset
-from PIL import Image
-import numpy as np
+from torchvision.transforms import ToTensor
+import torchvision.transforms.functional as TF 
 
-
-class DIV2KDataset(Dataset):
-    def __init__(self, hr_dir, lr_dir, patch_size=48, scale=4):
-        self.hr_dir = hr_dir
-        self.lr_dir = lr_dir
-        self.patch_size = patch_size
-        self.scale = scale
-
-        # Get HR filenames
-        self.hr_images = sorted(os.listdir(hr_dir))
+class VimeoDataset(Dataset):
+    def __init__(self, root_dir):
+        """
+        root_dir should be the main folder that contains BOTH 
+        'low_resolution' and 'target' subfolders.
+        """
+        self.lr_dir = os.path.join(root_dir, 'low_resolution')
+        self.hr_dir = os.path.join(root_dir, 'target')
+        
+        # Search for all im4.png files inside the target directory's subfolders
+        search_pattern = os.path.join(self.hr_dir, '*', '*', 'im4.png')
+        self.hr_image_paths = sorted(glob.glob(search_pattern))
+        
+        if len(self.hr_image_paths) == 0:
+            print(f"Warning: No im4.png files found in {search_pattern}")
+            
+        self.transform = ToTensor()
 
     def __len__(self):
-        return len(self.hr_images)
+        return len(self.hr_image_paths)
 
     def __getitem__(self, idx):
+        hr_path = self.hr_image_paths[idx]
+        lr_path = hr_path.replace('target', 'low_resolution')
 
-        # -----------------------------
-        # File names
-        # -----------------------------
-        hr_name = self.hr_images[idx]
-        lr_name = hr_name.replace(".png", f"x{self.scale}.png")
+        hr_image = Image.open(hr_path).convert('RGB')
+        lr_image = Image.open(lr_path).convert('RGB')
 
-        hr_path = os.path.join(self.hr_dir, hr_name)
-        lr_path = os.path.join(self.lr_dir, lr_name)
+        # --- DATA AUGMENTATION ---
+        # 50% chance to flip both images horizontally
+        if random.random() > 0.5:
+            hr_image = TF.hflip(hr_image)
+            lr_image = TF.hflip(lr_image)
+            
+        # 50% chance to flip both images vertically
+        if random.random() > 0.5:
+            hr_image = TF.vflip(hr_image)
+            lr_image = TF.vflip(lr_image)
+        # ------------------------------
 
-        # -----------------------------
-        # Load images
-        # -----------------------------
-        hr = Image.open(hr_path).convert("RGB")
-        lr = Image.open(lr_path).convert("RGB")
+        hr_tensor = self.transform(hr_image)
+        lr_tensor = self.transform(lr_image)
 
-        hr = np.array(hr)
-        lr = np.array(lr)
-
-        # -----------------------------
-        # Random Crop (VERY IMPORTANT)
-        # -----------------------------
-        h, w, _ = lr.shape
-
-        ps = self.patch_size
-
-        x = random.randint(0, w - ps)
-        y = random.randint(0, h - ps)
-
-        lr_patch = lr[y:y+ps, x:x+ps]
-        hr_patch = hr[
-            y*self.scale:(y+ps)*self.scale,
-            x*self.scale:(x+ps)*self.scale
-        ]
-
-        # -----------------------------
-        # Convert to tensor
-        # -----------------------------
-        lr_patch = torch.from_numpy(lr_patch).permute(2, 0, 1).float() / 255.0
-        hr_patch = torch.from_numpy(hr_patch).permute(2, 0, 1).float() / 255.0
-
-        return lr_patch, hr_patch
+        return lr_tensor, hr_tensor

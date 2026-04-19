@@ -1,97 +1,73 @@
-import os
+﻿import os
 import random
+import glob
 import torch
-import torchvision.transforms as transforms
 from PIL import Image
-
+from torchvision.transforms import ToTensor, ToPILImage
 from model import ESPCN
-torch.backends.cudnn.benchmark = True
 
-# -----------------------------
-# SETTINGS
-# -----------------------------
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# ==============================================================================
+# ⚠️ PATHS: ADD YOUR SPECIFIC DIRECTORIES HERE ⚠️
+# ==============================================================================
+# Point this to the testing set directory containing 'low_resolution'
+TEST_DATA_ROOT = r"D:\vimeo_super_resolution_test" 
+LOAD_MODEL_PATH = "espcn_vimeo_deep_final.pth" # The file created by train.py
+SAVE_RESULT_DIR = "./test_results"  # Folder where the upscaled image will be saved
+# ==============================================================================
 
-MODEL_PATH = "espcn.pth"
+def test_random_image():
+    # 1. Setup Device
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
+    # 2. Ensure save directory exists
+    os.makedirs(SAVE_RESULT_DIR, exist_ok=True)
 
-HR_DIR = r"D:\DIV2K\DIV2K_train_HR"
-LR_DIR = r"D:\DIV2K\X4"
+    # 3. Load the Model
+    model = ESPCN(scale_factor=4).to(device)
+    if not os.path.exists(LOAD_MODEL_PATH):
+        print(f"Error: Model weights '{LOAD_MODEL_PATH}' not found. Run train.py first!")
+        return
+        
+    model.load_state_dict(torch.load(LOAD_MODEL_PATH, map_location=device, weights_only=True))
+    model.eval() # Set model to evaluation mode
+    print("Model loaded successfully.")
 
-# -----------------------------
-# LOAD MODEL
-# -----------------------------
-model = ESPCN(scale_factor=4).to(DEVICE)
-model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
-model.eval()
+    # 4. Find all random low-res im4.png files in the testing set
+    lr_dir = os.path.join(TEST_DATA_ROOT, 'low_resolution')
+    search_pattern = os.path.join(lr_dir, '*', '*', 'im4.png')
+    lr_images = glob.glob(search_pattern)
+    
+    if not lr_images:
+        print(f"Error: No im4.png files found in {search_pattern}")
+        return
 
-print("✅ Model loaded")
+    # 5. Pick a random image
+    random_img_path = random.choice(lr_images)
+    print(f"Selected random image: {random_img_path}")
 
-# -----------------------------
-# PICK RANDOM IMAGE
-# -----------------------------
-lr_images = os.listdir(LR_DIR)
-lr_name = random.choice(lr_images)
+    # 6. Process the image
+    img_pil = Image.open(random_img_path).convert('RGB')
+    transform_to_tensor = ToTensor()
+    transform_to_pil = ToPILImage()
 
-hr_name = lr_name.replace("x4", "")
+    # Add a batch dimension (e.g., [3, 64, 64] becomes [1, 3, 64, 64]) and move to GPU
+    input_tensor = transform_to_tensor(img_pil).unsqueeze(0).to(device)
 
-lr_path = os.path.join(LR_DIR, lr_name)
-hr_path = os.path.join(HR_DIR, hr_name)
-
-print("🖼 Testing image:", lr_name)
-
-# -----------------------------
-# LOAD IMAGE
-# -----------------------------
-transform = transforms.ToTensor()
-
-lr_img = Image.open(lr_path).convert("RGB")
-lr_tensor = transform(lr_img).unsqueeze(0).to(DEVICE)
-
-# -----------------------------
-# WARM-UP (IMPORTANT)
-# -----------------------------
-for _ in range(10):
-    _ = model(lr_tensor)
-
-# -----------------------------
-# CUDA TIMING
-# -----------------------------
-if DEVICE == "cuda":
-    starter = torch.cuda.Event(enable_timing=True)
-    ender = torch.cuda.Event(enable_timing=True)
-
-    torch.cuda.synchronize()
-
-    starter.record()
-
+    # 7. Run inference (No gradients needed)
     with torch.no_grad():
-        sr_tensor = model(lr_tensor)
+        output_tensor = model(input_tensor)
 
-    ender.record()
-    torch.cuda.synchronize()
+    # 8. Remove batch dimension and convert back to image
+    output_tensor = output_tensor.squeeze(0).cpu()
+    output_img_pil = transform_to_pil(output_tensor)
 
-    time_ms = starter.elapsed_time(ender)
+    # 9. Save the original and upscaled images side-by-side
+    save_path = os.path.join(SAVE_RESULT_DIR, "upscaled_result.png")
+    output_img_pil.save(save_path)
+    
+    # Also save the original low-res so you can compare them
+    img_pil.save(os.path.join(SAVE_RESULT_DIR, "original_low_res.png"))
+    print(f"Success! Upscaled image saved to: {SAVE_RESULT_DIR}")
 
-else:
-    import time
-    start = time.time()
-
-    with torch.no_grad():
-        sr_tensor = model(lr_tensor)
-
-    end = time.time()
-    time_ms = (end - start) * 1000
-
-print(f"🔥 Inference Time: {time_ms:.3f} ms")
-
-# -----------------------------
-# SAVE OUTPUT IMAGE
-# -----------------------------
-sr_tensor = sr_tensor.squeeze(0).cpu().clamp(0, 1)
-
-to_pil = transforms.ToPILImage()
-sr_img = to_pil(sr_tensor)
-
-sr_img.save("output_sr.png")
-
-print("✅ Super-resolved image saved as output_sr.png")
+if __name__ == "__main__":
+    test_random_image()
