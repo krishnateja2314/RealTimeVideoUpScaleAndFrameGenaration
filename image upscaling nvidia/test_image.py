@@ -11,7 +11,7 @@ from model import ESPCN
 # ==============================================================================
 # Point this to the testing set directory containing 'low_resolution'
 TEST_DATA_ROOT = r"D:\vimeo_super_resolution_test" 
-LOAD_MODEL_PATH = "espcn_vimeo_deep_final.pth" # The file created by train.py
+LOAD_MODEL_PATH = "espcn_vimeo_final.pth" # The file created by train.py
 SAVE_RESULT_DIR = "./test_results"  # Folder where the upscaled image will be saved
 # ==============================================================================
 

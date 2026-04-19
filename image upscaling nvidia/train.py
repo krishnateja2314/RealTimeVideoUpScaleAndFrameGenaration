@@ -15,7 +15,7 @@ SAVE_MODEL_PATH = "espcn_vimeo_final.pth"
 
 # Hyperparameters
 BATCH_SIZE = 16  # Keep this low (8 or 16) so you don't crash your 4GB RTX 3050 VRAM
-NUM_EPOCHS = 10
+NUM_EPOCHS = 100
 LEARNING_RATE = 0.001
 
 def train():
@@ -31,7 +31,7 @@ def train():
 
     # 3. Initialize Model, Loss (L1 generally yields sharper SR results), and Optimizer
     model = ESPCN(scale_factor=4).to(device)
-    criterion = nn.L1Loss() 
+    criterion = nn.L1Loss()
     optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
 
     # 4. Training Loop

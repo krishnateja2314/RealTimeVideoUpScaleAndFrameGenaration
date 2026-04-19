@@ -15,7 +15,7 @@ warnings.filterwarnings("ignore", category=UserWarning)
 # ==============================================================================
 # Make sure this points to your TESTING set, not the training set!
 TEST_DATA_ROOT = r"D:\vimeo_super_resolution_test" 
-LOAD_MODEL_PATH = "espcn_vimeo_deep_final.pth"
+LOAD_MODEL_PATH = "espcn_vimeo_final.pth"
 # ==============================================================================
 
 def calculate_psnr():
