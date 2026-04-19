@@ -7,5 +7,6 @@ test/
 *.pth
 output.png
 *.onnx*
+models/
 model.pth
 output_onnx.png

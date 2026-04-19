@@ -3,7 +3,7 @@ import time
 import numpy as np
 from torch.utils.data import DataLoader
 from dataset import VimeoDataset
-from model import FlowNet
+from model import InterpolationModel
 from torchvision.transforms import ToPILImage
 import math
 
@@ -21,7 +21,8 @@ def main():
     dataset = VimeoDataset(DATA_ROOT, TEST_LIST)
     loader = DataLoader(dataset, batch_size=1, shuffle=False)
 
-    model = FlowNet().to(device)
+    
+    model = InterpolationModel().to(device)
     model.load_state_dict(torch.load("model.pth"))
     model.eval()
 

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from dataset import VimeoDataset
-from model import FlowNet
+from model import InterpolationModel
 
 # Charbonnier Loss (Better than L1 for edges)
 class CharbonnierLoss(nn.Module):
@@ -40,7 +40,8 @@ def main():
     dataset = VimeoDataset(DATA_ROOT, TRAIN_LIST)
     loader = DataLoader(dataset, batch_size=16, shuffle=True, num_workers=6, pin_memory=True)
 
-    model = FlowNet().to(device)
+    
+    model = InterpolationModel().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=1e-4)
     
     criterion_pixel = CharbonnierLoss().to(device)
