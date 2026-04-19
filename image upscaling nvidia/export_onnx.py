@@ -47,7 +47,7 @@ def export_to_onnx():
         dummy_input,                   # The dummy tensor to trace
         ONNX_OUTPUT_PATH,              # Where to save the file
         export_params=True,            # Store the trained weights inside the ONNX file
-        opset_version=14,              # Opset 14 is highly stable for modern PyTorch operations
+        opset_version=16,              # Opset 14 is highly stable for modern PyTorch operations
         do_constant_folding=True,      # Optimizes the math for faster inference
         input_names=['im_lr'],         # Name of the input tensor (matches your teammate's specs)
         output_names=['pred_hr'],      # Name of the output tensor
