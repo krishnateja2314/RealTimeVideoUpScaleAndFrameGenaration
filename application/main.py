@@ -7,6 +7,7 @@ import sys
 import logging
 import argparse
 from pathlib import Path
+import cv2
 
 # Setup logging
 logging.basicConfig(
@@ -54,6 +55,13 @@ Examples:
                        help='Output video codec (default: mp4v)')
     parser.add_argument('--batch-size', type=int, default=None,
                        help='Batch size (auto-detect if not specified)')
+    parser.add_argument('--duration', type=float, default=None,
+                       help='Process only the first N seconds of the video')
+    provider_group = parser.add_mutually_exclusive_group()
+    provider_group.add_argument('--use-gpu', action='store_true',
+                       help='Try MIGraphX GPU provider (may be unstable on AMD GPUs)')
+    provider_group.add_argument('--cpu', action='store_true',
+                       help='Force CPU ONNX inference (stable, default)')
     parser.add_argument('--debug', action='store_true',
                        help='Enable debug logging')
     
@@ -95,7 +103,17 @@ Examples:
         logger.error("Could not find ONNX model files. Please ensure models are in the correct location.")
         return 1
     
-    model_loader = ONNXModelLoader(providers=detector.get_providers())
+    # Default to CPU for stability; GPU requires explicit flag
+    providers = ['CPUExecutionProvider']
+    if args.use_gpu:
+        providers = ['MIGraphXExecutionProvider', 'CPUExecutionProvider']
+        logger.info(f"Using MIGraphX GPU providers (may be unstable): {providers}")
+    elif not args.cpu:
+        logger.info("Using CPUExecutionProvider for stability (pass --use-gpu to try GPU).")
+    else:
+        logger.info("Forcing CPUExecutionProvider as requested.")
+
+    model_loader = ONNXModelLoader(providers=providers)
     model_loader.load_frame_interpolator(str(interpolator_path))
     model_loader.load_upscaler(str(upscaler_path))
     
@@ -106,7 +124,7 @@ Examples:
     
     optimal_batch = model_loader.auto_detect_batch_size(
         model_loader.interpolator_session,
-        max_attempts=4,
+        max_attempts=1,
         start_batch=1
     )
     logger.info(f"Optimal batch size: {optimal_batch}")
@@ -155,13 +173,29 @@ Examples:
             logger.info(f"Progress: {current}/{total} ({percent:.1f}%) - {fps:.2f} FPS")
         
         try:
+            max_frames = None
+            if args.duration is not None:
+                capture = cv2.VideoCapture(str(video_path))
+                if capture.isOpened():
+                    source_fps = capture.get(cv2.CAP_PROP_FPS)
+                    capture.release()
+                else:
+                    source_fps = 0
+
+                if source_fps > 0:
+                    max_frames = int(round(source_fps * args.duration))
+                    logger.info(f"Limiting processing to first {args.duration:.2f} seconds ({max_frames} frames)")
+                else:
+                    logger.warning("Could not determine source FPS. Duration limit will be ignored.")
+
             stats = processor.process_video(
                 input_path=str(video_path),
                 output_path=args.output,
                 target_fps=args.target_fps,
                 interpolation_factor=args.interpolation,
                 codec=args.codec,
-                progress_callback=progress_callback
+                progress_callback=progress_callback,
+                max_frames=max_frames
             )
             
             logger.info(f"\n✅ Video processing complete!")

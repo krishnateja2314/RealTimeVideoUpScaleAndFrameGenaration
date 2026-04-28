@@ -12,3 +12,6 @@ output.png
 models/
 model.pth
 output_onnx.png
+*.pdf
+*.log
+*.sh

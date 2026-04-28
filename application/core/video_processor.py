@@ -1,6 +1,6 @@
 """
 Main video processing pipeline.
-Chains frame interpolation and 4x upscaling with asynchronous threading support.
+Fixed version: correct tensor handling, normalization, and padding.
 """
 
 import cv2
@@ -9,19 +9,16 @@ import logging
 import time
 import threading
 import queue
-from typing import Callable, Optional, Tuple, List, Dict
-from pathlib import Path
+from typing import Callable, Optional, List, Dict
 
 logger = logging.getLogger(__name__)
 
 
 class VideoProcessor:
-    """Process video through interpolation and upscaling pipeline with Async I/O."""
-    
-    def __init__(self, model_loader, batch_size: int = 2):
+    def __init__(self, model_loader, batch_size: int = 1):
         self.model_loader = model_loader
         self.batch_size = batch_size
-    
+
     def process_video(
         self,
         input_path: str,
@@ -29,227 +26,245 @@ class VideoProcessor:
         target_fps: int = 60,
         interpolation_factor: int = 1,
         codec: str = 'mp4v',
-        quality: str = 'high',
-        progress_callback: Optional[Callable] = None
+        progress_callback: Optional[Callable] = None,
+        max_frames: int = None
     ) -> Dict:
-        logger.info(f"Starting video processing")
-        logger.info(f"  Input: {input_path}")
-        logger.info(f"  Output: {output_path}")
-        
+
         video = cv2.VideoCapture(input_path)
         if not video.isOpened():
             raise ValueError(f"Cannot open input video: {input_path}")
-        
+
         source_fps = video.get(cv2.CAP_PROP_FPS)
         frame_width = int(video.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(video.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        total_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
-        
+
+        max_input_frames = None
+        max_input_pairs = None
+        if max_frames is not None:
+            max_input_frames = max_frames
+            max_input_pairs = max(0, max_frames - 1)
+
         output_height = frame_height * 4
         output_width = frame_width * 4
-        
+
         writer = self._setup_video_writer(
             output_path, output_width, output_height, target_fps, codec
         )
-        
-        if writer is None:
-            raise RuntimeError("Failed to create video writer")
-        
+
         stats = {
             'frames_processed': 0,
             'frames_written': 0,
             'total_time_seconds': 0,
-            'input_frames': total_frames,
-            'output_frames': 0,
-            'errors': []
         }
 
         input_queue = queue.Queue(maxsize=16)
         output_queue = queue.Queue(maxsize=32)
         stop_event = threading.Event()
 
+        # ======================
+        # READER THREAD
+        # ======================
         def reader_thread():
-            frame_buffer = []
-            while not stop_event.is_set():
+            prev_frame = None
+            frames_read = 0
+
+            while max_input_frames is None or frames_read < max_input_frames:
                 ret, frame = video.read()
                 if not ret:
                     break
-                
-                frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frame_buffer.append(frame_rgb)
-                
-                if len(frame_buffer) >= 2:
-                    for i in range(len(frame_buffer) - 1):
-                        pair = (frame_buffer[i], frame_buffer[i + 1])
-                        while not stop_event.is_set():
-                            try:
-                                input_queue.put(pair, timeout=0.5)
-                                break
-                            except queue.Full:
-                                continue
-                    frame_buffer = [frame_buffer[-1]]
-            
-            while not stop_event.is_set():
-                try:
-                    input_queue.put(None, timeout=0.5)
-                    break
-                except queue.Full:
-                    continue
 
+                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+                if prev_frame is not None:
+                    input_queue.put((prev_frame, frame))
+
+                prev_frame = frame
+                frames_read += 1
+
+            input_queue.put(None)
+
+        # ======================
+        # WRITER THREAD
+        # ======================
         def writer_thread():
-            while not stop_event.is_set():
-                try:
-                    frames_to_write = output_queue.get(timeout=0.5)
-                    if frames_to_write is None:
-                        break
-                    
-                    for out_frame in frames_to_write:
-                        out_frame_bgr = cv2.cvtColor(out_frame, cv2.COLOR_RGB2BGR)
-                        writer.write(out_frame_bgr)
-                        stats['frames_written'] += 1
-                        
-                    output_queue.task_done()
-                except queue.Empty:
-                    continue
+            while True:
+                frames = output_queue.get()
+                if frames is None:
+                    break
+
+                for f in frames:
+                    f = cv2.cvtColor(f, cv2.COLOR_RGB2BGR)
+
+                    if f.shape[:2] != (output_height, output_width):
+                        f = cv2.resize(f, (output_width, output_height))
+
+                    writer.write(f)
+                    stats['frames_written'] += 1
 
         t_read = threading.Thread(target=reader_thread, daemon=True)
         t_write = threading.Thread(target=writer_thread, daemon=True)
+
         t_read.start()
         t_write.start()
 
         start_time = time.time()
+
         try:
             while True:
-                try:
-                    pair = input_queue.get(timeout=0.5)
-                except queue.Empty:
-                    if not t_read.is_alive() and input_queue.empty():
-                        break
-                    continue
-                
+                pair = input_queue.get()
                 if pair is None:
                     break
-                    
-                frame1, frame2 = pair
-                stats['frames_processed'] += 1  # Fixed: Advance timeline by 1 per pair
-                
-                # Check if this is the very last pair in the video
-                is_last_pair = (stats['frames_processed'] >= total_frames - 1)
-                
-                try:
-                    output_frames = self._process_frame_pair(
-                        frame1, frame2, interpolation_factor, is_last_pair
-                    )
-                    
-                    while not stop_event.is_set():
-                        try:
-                            output_queue.put(output_frames, timeout=0.5)
-                            break
-                        except queue.Full:
-                            continue
-                            
-                    if progress_callback and stats['frames_processed'] % 10 == 0:
-                        elapsed = time.time() - start_time
-                        fps = stats['frames_processed'] / elapsed if elapsed > 0 else 0
-                        progress_callback(stats['frames_processed'], total_frames, fps)
-                        
-                except Exception as e:
-                    logger.error(f"Error processing frame pair: {e}")
-                    stats['errors'].append(str(e))
-                
-                input_queue.task_done()
 
-        except KeyboardInterrupt:
-            logger.warning("\n✋ Interrupted by user! Flushing queues and saving processed frames...")
-            stop_event.set()
-        
+                frame1, frame2 = pair
+                stats['frames_processed'] += 1
+
+                is_last = False
+                if max_input_pairs is not None and stats['frames_processed'] >= max_input_pairs:
+                    is_last = True
+
+                output_frames = self._process_frame_pair(
+                    frame1, frame2, interpolation_factor, is_last
+                )
+
+                output_queue.put(output_frames)
+
         finally:
-            stop_event.set()
-            
-            while not input_queue.empty():
-                try: input_queue.get_nowait()
-                except queue.Empty: break
-                
-            try: output_queue.put(None, timeout=1)
-            except queue.Full: pass
-            
-            t_write.join(timeout=3.0)
-            
+            output_queue.put(None)
+            t_write.join()
+
             video.release()
             writer.release()
-            
+
             stats['total_time_seconds'] = time.time() - start_time
-            stats['output_frames'] = stats['frames_written']
             
-            self._log_stats(stats)
-            
+            # Copy audio from input to output
+            import os
+            output_path_temp = output_path + '.temp.mp4'
+            try:
+                os.rename(output_path, output_path_temp)
+                self._copy_audio_ffmpeg(input_path, output_path_temp, output_path)
+                
+                # Clean up temp file if audio copy succeeded
+                if os.path.exists(output_path_temp):
+                    try:
+                        os.remove(output_path_temp)
+                    except:
+                        pass
+            except Exception as e:
+                logger.warning(f"Audio copy setup failed: {e}")
+                # If rename fails, keep original output path
+
         return stats
-    
+
+    # ======================
+    # CORE PROCESSING
+    # ======================
     def _process_frame_pair(
         self,
         frame1: np.ndarray,
         frame2: np.ndarray,
-        interpolation_factor: int = 1,
-        is_last_pair: bool = False
+        interpolation_factor: int,
+        is_last_pair: bool
     ) -> List[np.ndarray]:
-        """Process one frame pair through ONNX models."""
-        from utils.normalization import normalize_frame, to_nchw, to_hwc, denormalize_frame
+
+        from utils.normalization import normalize_frame, to_nchw
         from utils.padding import reflect_pad, crop_padding
-        
-        f1_norm = normalize_frame(frame1)
-        f2_norm = normalize_frame(frame2)
-        
-        f1_nchw, pad_info = reflect_pad(to_nchw(f1_norm))
-        f2_nchw = reflect_pad(to_nchw(f2_norm))[0]
-        
+
+        f1 = normalize_frame(frame1)
+        f2 = normalize_frame(frame2)
+
+        f1_nchw, pad_info = reflect_pad(to_nchw(f1))
+        f2_nchw, _ = reflect_pad(to_nchw(f2))
+
         output_frames = []
-        
+
+        def finalize_tensor(tensor):
+            """
+            Robust tensor -> image conversion
+            Handles:
+            - [1,C,H,W]
+            - [-1,1] or [0,1]
+            """
+
+            tensor = np.ascontiguousarray(tensor.astype(np.float32))
+            tensor = crop_padding(tensor, pad_info, scale=4)
+
+            img = np.squeeze(tensor)
+
+            # CHW -> HWC
+            if img.ndim == 3 and img.shape[0] in [1, 3]:
+                img = np.transpose(img, (1, 2, 0))
+
+            if img.ndim == 2:
+                img = np.stack([img, img, img], axis=2)
+            elif img.shape[2] == 1:
+                img = np.repeat(img, 3, axis=2)
+
+            min_val = img.min()
+            if min_val < -0.1:
+                img = (img + 1.0) / 2.0
+
+            img = np.clip(img, 0.0, 1.0)
+            img = (img * 255.0).round().astype(np.uint8)
+
+            return np.ascontiguousarray(img)
+
         # Frame 1
-        f1_upscaled = self.model_loader.run_upscaler(f1_nchw)
-        f1_upscaled = np.clip(f1_upscaled, 0.0, 1.0)
-        output_frames.append(denormalize_frame(to_hwc(f1_upscaled)))
-        
-        # Interpolated frames
-        for i in range(interpolation_factor):
-            interpolated = self.model_loader.run_interpolator(f1_nchw, f2_nchw)
-            interpolated = np.clip(interpolated, 0.0, 1.0)
-            
-            upscaled = self.model_loader.run_upscaler(interpolated)
-            upscaled = np.clip(upscaled, 0.0, 1.0)
-            
-            upscaled_cropped = crop_padding(upscaled, pad_info)
-            output_frames.append(denormalize_frame(to_hwc(upscaled_cropped)))
-        
-        # Fixed: ONLY append Frame 2 if it's the end of the video to prevent duplicates
+        f1_up = self.model_loader.run_upscaler(f1_nchw)
+        output_frames.append(finalize_tensor(f1_up))
+
+        # Interpolation
+        for _ in range(interpolation_factor):
+            inter = self.model_loader.run_interpolator(f1_nchw, f2_nchw)
+            inter_up = self.model_loader.run_upscaler(inter)
+            output_frames.append(finalize_tensor(inter_up))
+
+        # Frame 2
         if is_last_pair:
-            f2_upscaled = self.model_loader.run_upscaler(f2_nchw)
-            f2_upscaled = np.clip(f2_upscaled, 0.0, 1.0)
-            output_frames.append(denormalize_frame(to_hwc(f2_upscaled)))
-        
+            f2_up = self.model_loader.run_upscaler(f2_nchw)
+            output_frames.append(finalize_tensor(f2_up))
+
         return output_frames
+
+    def _setup_video_writer(self, path, w, h, fps, codec):
+        """Setup video writer without audio (audio added post-processing)."""
+        fourcc = cv2.VideoWriter_fourcc(*codec)
+        writer = cv2.VideoWriter(path, fourcc, fps, (w, h))
+        return writer if writer.isOpened() else None
     
-    def _setup_video_writer(self, output_path: str, width: int, height: int, fps: float, codec: str) -> cv2.VideoWriter:
-        codec_map = {
-            'mp4v': cv2.VideoWriter_fourcc(*'mp4v'),
-            'h264': cv2.VideoWriter_fourcc(*'avc1'),
-            'h265': cv2.VideoWriter_fourcc(*'hev1'),
-            'vp9': cv2.VideoWriter_fourcc(*'vp90'),
-        }
-        fourcc = codec_map.get(codec, cv2.VideoWriter_fourcc(*'mp4v'))
-        writer = cv2.VideoWriter(output_path, fourcc, fps, (width, height))
-        if not writer.isOpened():
-            logger.error(f"Failed to create video writer with codec {codec}")
-            return None
-        return writer
-    
-    def _log_stats(self, stats: dict):
-        logger.info("\n" + "="*60)
-        logger.info("VIDEO PROCESSING COMPLETE")
-        logger.info("="*60)
-        logger.info(f"  Frames Processed: {stats['frames_processed']}")
-        logger.info(f"  Frames Written: {stats['frames_written']}")
-        logger.info(f"  Total Time: {stats['total_time_seconds']:.2f} seconds")
-        if stats['total_time_seconds'] > 0:
-            fps = stats['frames_processed'] / stats['total_time_seconds']
-            logger.info(f"  Processing Speed: {fps:.2f} FPS")
-        logger.info("="*60 + "\n")
+    def _copy_audio_ffmpeg(self, input_path: str, output_path_video: str, output_path_final: str):
+        """Copy audio from input to output using ffmpeg."""
+        import subprocess
+        import shutil
+        
+        try:
+            # Check if ffmpeg is available
+            subprocess.run(['ffmpeg', '-version'], capture_output=True, check=True, timeout=5)
+            
+            logger.info(f"Copying audio from {input_path} to {output_path_final}...")
+            cmd = [
+                'ffmpeg',
+                '-i', output_path_video,  # video input
+                '-i', input_path,          # audio input
+                '-c:v', 'copy',            # copy video codec
+                '-c:a', 'aac',             # encode audio as AAC
+                '-map', '0:v:0',           # map video from first input
+                '-map', '1:a:0',           # map audio from second input
+                '-shortest',               # stop when shortest stream ends
+                '-y',                      # overwrite output
+                output_path_final
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, timeout=300)
+            logger.info(f"✓ Audio copied successfully")
+            return True
+        except (FileNotFoundError, subprocess.CalledProcessError) as e:
+            logger.warning(f"Audio copy failed: {e}. Output will be silent.")
+            # Fallback: just rename video file
+            try:
+                shutil.move(output_path_video, output_path_final)
+            except:
+                pass
+            return False
+        except Exception as e:
+            logger.warning(f"Audio copy error: {e}")
+            return False

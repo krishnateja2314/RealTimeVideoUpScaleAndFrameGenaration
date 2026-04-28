@@ -93,21 +93,26 @@ def reflect_pad(frame: np.ndarray, target_height: int = None, target_width: int 
     return padded, padding_info
 
 
-def crop_padding(frame: np.ndarray, padding_info: tuple) -> np.ndarray:
+def crop_padding(frame: np.ndarray, padding_info: tuple, scale: int = 1) -> np.ndarray:
     """
     Remove padding from frame to restore original dimensions.
     
     Args:
         frame: Padded frame with shape [H', W', C] or [B, C, H', W']
         padding_info: Tuple of (orig_h, orig_w, (pad_top, pad_bottom), (pad_left, pad_right))
+        scale: Scale factor applied to the frame (1 for input, 4 for upscaled output)
     
     Returns:
-        Cropped frame with original dimensions
+        Cropped frame with original dimensions (or scaled original dimensions)
     """
     orig_h, orig_w, (pad_top, pad_bottom), (pad_left, pad_right) = padding_info
-    
+    pad_top *= scale
+    pad_bottom *= scale
+    pad_left *= scale
+    pad_right *= scale
+
     is_nchw = frame.ndim == 4 and frame.shape[1] in [1, 3, 4]
-    
+
     if is_nchw:
         # [B, C, H, W] format
         if pad_top > 0 or pad_bottom > 0:
@@ -120,9 +125,9 @@ def crop_padding(frame: np.ndarray, padding_info: tuple) -> np.ndarray:
             frame = frame[pad_top:frame.shape[0]-pad_bottom, :, :]
         if pad_left > 0 or pad_right > 0:
             frame = frame[:, pad_left:frame.shape[1]-pad_right, :]
-    
-    logger.debug(f"Cropped padding: restored to {orig_h}x{orig_w}")
-    
+
+    logger.debug(f"Cropped padding: restored to {orig_h*scale}x{orig_w*scale} (scale={scale})")
+
     return frame
 
 

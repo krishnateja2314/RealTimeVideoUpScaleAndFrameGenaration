@@ -1,12 +1,14 @@
 """
 Detect hardware capabilities and select appropriate ONNX Runtime providers.
-Supports: ROCm (AMD), CUDA (NVIDIA), DirectML (Windows), CoreML (macOS), CPU
+Supports: MIGraphX (AMD), CUDA (NVIDIA), DirectML (Windows), CoreML (macOS), CPU
 """
 
 import platform
 import subprocess
 import logging
 from typing import List, Tuple
+
+import onnxruntime as ort
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,8 @@ class HardwareDetector:
     """Detect GPU and CPU capabilities, select optimal ONNX providers."""
     
     PROVIDER_PRIORITY = {
-        'Linux': ['ROCmExecutionProvider', 'CPUExecutionProvider'],
+        # UPDATED: AMD MIGraphX is unstable, default to CPU for stability
+        'Linux': ['CPUExecutionProvider'],  # MIGraphX removed due to memory faults
         'Windows': ['CUDAExecutionProvider', 'DirectmlExecutionProvider', 'CPUExecutionProvider'],
         'Darwin': ['CoreMLExecutionProvider', 'CPUExecutionProvider'],
     }
@@ -23,6 +26,7 @@ class HardwareDetector:
     def __init__(self):
         self.os_name = platform.system()
         self.gpu_info = {}
+        self.available_providers = self._detect_available_providers()
         self.detected_providers = []
         self._detect_hardware()
     
@@ -37,6 +41,7 @@ class HardwareDetector:
         
         logger.info(f"Detected OS: {self.os_name}")
         logger.info(f"GPU Info: {self.gpu_info}")
+        logger.info(f"Available ONNX providers: {self.available_providers}")
     
     def _detect_linux_gpu(self):
         """Detect GPU on Linux using rocm-smi or nvidia-smi."""
@@ -45,9 +50,10 @@ class HardwareDetector:
             result = subprocess.run(['rocm-smi'], capture_output=True, text=True, timeout=5)
             if result.returncode == 0:
                 self.gpu_info['type'] = 'AMD'
-                self.gpu_info['provider'] = 'ROCmExecutionProvider'
+                # MIGraphX is unstable, default to CPU for stability
+                self.gpu_info['provider'] = 'CPUExecutionProvider'
                 self._parse_rocm_output(result.stdout)
-                logger.info("✓ AMD ROCm GPU detected")
+                logger.info("✓ AMD GPU detected (Using CPU for stability - MIGraphX unstable)")
                 return
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
@@ -59,7 +65,14 @@ class HardwareDetector:
                 self.gpu_info['type'] = 'NVIDIA'
                 self.gpu_info['provider'] = 'CUDAExecutionProvider'
                 self._parse_nvidia_output(result.stdout)
-                logger.info("✓ NVIDIA CUDA GPU detected")
+                if 'CUDAExecutionProvider' not in self.available_providers:
+                    self.gpu_info['provider'] = 'CPUExecutionProvider'
+                    logger.warning(
+                        'NVIDIA GPU detected, but CUDA execution provider is not available. '
+                        'Falling back to CPUExecutionProvider.'
+                    )
+                else:
+                    logger.info("✓ NVIDIA CUDA GPU detected")
                 return
         except (FileNotFoundError, subprocess.TimeoutExpired):
             pass
@@ -91,7 +104,14 @@ class HardwareDetector:
         """Detect GPU on macOS."""
         self.gpu_info['type'] = 'Apple Silicon / Intel'
         self.gpu_info['provider'] = 'CoreMLExecutionProvider'
-        logger.info("ℹ CoreML provider set for macOS")
+        if 'CoreMLExecutionProvider' not in self.available_providers:
+            self.gpu_info['provider'] = 'CPUExecutionProvider'
+            logger.warning(
+                'macOS GPU detected, but CoreML execution provider is not available. '
+                'Falling back to CPUExecutionProvider.'
+            )
+        else:
+            logger.info("ℹ CoreML provider set for macOS")
     
     def _parse_rocm_output(self, output: str):
         """Parse rocm-smi output to extract GPU info."""
@@ -115,6 +135,15 @@ class HardwareDetector:
         except Exception as e:
             logger.debug(f"Could not parse NVIDIA output: {e}")
     
+    def _detect_available_providers(self) -> List[str]:
+        """Get available ONNX Runtime providers from the current onnxruntime installation."""
+        try:
+            providers = ort.get_available_providers()
+            return providers
+        except Exception as e:
+            logger.warning(f"Unable to query ONNX Runtime providers: {e}")
+            return []
+
     def get_providers(self) -> List[str]:
         """
         Get ONNX Runtime providers in priority order.
@@ -122,9 +151,18 @@ class HardwareDetector:
         Returns:
             List of provider names to pass to ONNX Session
         """
-        providers = self.PROVIDER_PRIORITY.get(self.os_name, ['CPUExecutionProvider'])
-        logger.info(f"ONNX Provider priority: {providers}")
-        return providers
+        preferred = self.PROVIDER_PRIORITY.get(self.os_name, ['CPUExecutionProvider'])
+        selected = [p for p in preferred if p in self.available_providers]
+        if not selected and 'CPUExecutionProvider' in self.available_providers:
+            selected = ['CPUExecutionProvider']
+        if not selected:
+            logger.error(
+                'No supported ONNX Runtime providers were found. '
+                'Please install onnxruntime with GPU support or use CPU.'
+            )
+        logger.info(f"ONNX Provider priority: {preferred}")
+        logger.info(f"Selected ONNX providers: {selected}")
+        return selected
     
     def get_gpu_type(self) -> str:
         """Get detected GPU type (AMD, NVIDIA, CPU, etc.)"""

@@ -22,10 +22,31 @@ class ONNXModelLoader:
         Args:
             providers: List of ONNX Runtime providers in priority order
         """
-        self.providers = providers or ['CPUExecutionProvider']
+        requested_providers = providers or ['MIGraphXExecutionProvider', 'CPUExecutionProvider']
+        self.available_providers = ort.get_available_providers()
+        self.providers = self._validate_providers(requested_providers)
         self.interpolator_session = None
         self.upscaler_session = None
         self.optimal_batch_size = None
+
+    def _validate_providers(self, providers: list) -> list:
+        valid = [p for p in providers if p in self.available_providers]
+        if not valid:
+            if 'CPUExecutionProvider' in self.available_providers:
+                valid = ['CPUExecutionProvider']
+                logger.warning(
+                    'Requested ONNX providers were not available. Falling back to CPUExecutionProvider.'
+                )
+            else:
+                raise RuntimeError(
+                    f'No supported ONNX Runtime providers available. Installed: {self.available_providers}'
+                )
+        elif len(valid) != len(providers):
+            logger.warning(
+                f'Some requested providers were not available. Using: {valid}; '
+                f'Installed providers: {self.available_providers}'
+            )
+        return valid
     
     def load_frame_interpolator(self, model_path: str) -> ort.InferenceSession:
         """
@@ -233,16 +254,29 @@ class ONNXModelLoader:
         # Get input names from model
         input_names = [inp.name for inp in self.interpolator_session.get_inputs()]
         
+        frame1 = np.ascontiguousarray(frame1.astype(np.float32))
+        frame2 = np.ascontiguousarray(frame2.astype(np.float32))
+
+        logger.debug(
+            f"Interpolator input shapes: {frame1.shape}, {frame2.shape} | provider: {self.interpolator_session.get_providers()}"
+        )
+        logger.debug(f"Interpolator input range: [{frame1.min():.3f}, {frame1.max():.3f}]")
+        
         # Prepare inputs (assumes im1, im3 naming from spec)
         inputs = {
-            input_names[0]: frame1.astype(np.float32),
-            input_names[1]: frame2.astype(np.float32),
+            input_names[0]: frame1,
+            input_names[1]: frame2,
         }
         
-        # Run inference
-        outputs = self.interpolator_session.run(None, inputs)
+        try:
+            outputs = self.interpolator_session.run(None, inputs)
+        except Exception as e:
+            logger.error(f"Interpolator inference failed: {e}")
+            raise
         
-        return outputs[0].astype(np.float32)
+        result = outputs[0].astype(np.float32)
+        logger.debug(f"Interpolator output shape: {result.shape} | range: [{result.min():.3f}, {result.max():.3f}]")
+        return result
     
     def run_upscaler(self, frame: np.ndarray) -> np.ndarray:
         """
@@ -257,13 +291,24 @@ class ONNXModelLoader:
         if self.upscaler_session is None:
             raise ValueError("Upscaler model not loaded")
         
-        # Get input name from model
+        frame = np.ascontiguousarray(frame.astype(np.float32))
         input_names = [inp.name for inp in self.upscaler_session.get_inputs()]
-        
+
+        logger.debug(
+            f"Upscaler input shape: {frame.shape} | provider: {self.upscaler_session.get_providers()}"
+        )
+        logger.debug(f"Upscaler input range: [{frame.min():.3f}, {frame.max():.3f}]")
+
         # Prepare input
-        inputs = {input_names[0]: frame.astype(np.float32)}
+        inputs = {input_names[0]: frame}
         
         # Run inference
-        outputs = self.upscaler_session.run(None, inputs)
+        try:
+            outputs = self.upscaler_session.run(None, inputs)
+        except Exception as e:
+            logger.error(f"Upscaler inference failed: {e}")
+            raise
         
-        return outputs[0].astype(np.float32)
+        result = outputs[0].astype(np.float32)
+        logger.debug(f"Upscaler output shape: {result.shape} | range: [{result.min():.3f}, {result.max():.3f}]")
+        return result
