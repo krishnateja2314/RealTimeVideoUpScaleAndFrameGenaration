@@ -1,4 +1,6 @@
 venv/
+.venv/
+.mp4/
 upscale_venv/
 data/
 *.png
