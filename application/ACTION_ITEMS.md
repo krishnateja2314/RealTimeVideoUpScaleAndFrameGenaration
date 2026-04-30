@@ -1,6 +1,6 @@
 # ACTION ITEMS - NEXT STEPS
 
-## 🎯 IMMEDIATE ACTION (Do This Now)
+##  IMMEDIATE ACTION (Do This Now)
 
 ### 1. Verify Pipeline Works
 
@@ -55,7 +55,7 @@ This will tell you if real-time processing is possible on your GPU.
 
 ---
 
-## 📋 PHASE 2: GUI DEVELOPMENT (After GPU Works)
+##  PHASE 2: GUI DEVELOPMENT (After GPU Works)
 
 - [ ] Install PyQt6: `pip3 install --user PyQt6`
 - [ ] Create main window (drag-drop file selection)
@@ -68,7 +68,7 @@ This will tell you if real-time processing is possible on your GPU.
 
 ---
 
-## 📦 PHASE 3: INSTALLER CREATION (After GUI Complete)
+## PHASE 3: INSTALLER CREATION (After GUI Complete)
 
 - [ ] Create PyInstaller build script
 - [ ] Build Windows MSI installer
@@ -81,7 +81,7 @@ This will tell you if real-time processing is possible on your GPU.
 
 ---
 
-## 📊 PHASE 4: ADVANCED FEATURES (Optional)
+##  PHASE 4: ADVANCED FEATURES (Optional)
 
 - [ ] Custom interpolation factors
 - [ ] Advanced codec settings (bitrate, quality)
@@ -94,7 +94,7 @@ This will tell you if real-time processing is possible on your GPU.
 
 ---
 
-## 📝 FILES TO KNOW
+##  FILES TO KNOW
 
 | File                 | Purpose             | Status               |
 | -------------------- | ------------------- | -------------------- |
@@ -106,7 +106,7 @@ This will tell you if real-time processing is possible on your GPU.
 
 ---
 
-## 💾 YOUR TEST VIDEO INFO
+##  YOUR TEST VIDEO INFO
 
 ```
 Path: /run/media/krishnateja/Coding/ca2030/Ca2030/output_lowres.mp4
@@ -118,8 +118,8 @@ Duration: ~361 seconds (6 minutes)
 
 Perfect for testing! Once GPU is set up, you'll see:
 
-- ✅ Current (CPU): 3.97 FPS (~51 minutes to process)
-- ✅ Expected (GPU): 30-60+ FPS (~3-6 minutes to process)
+-  Current (CPU): 3.97 FPS (~51 minutes to process)
+-  Expected (GPU): 30-60+ FPS (~3-6 minutes to process)
 
 ---
 
@@ -179,7 +179,7 @@ cp /path/to/espcn_4x_dynamic.onnx application/models/
 
 ---
 
-## 📞 TESTING CHECKLIST
+##  TESTING CHECKLIST
 
 - [ ] Run `python3 application/test_pipeline.py` - should pass all tests
 - [ ] Run `python3 application/main.py --detect-hardware` - check provider
@@ -190,7 +190,7 @@ cp /path/to/espcn_4x_dynamic.onnx application/models/
 
 ---
 
-## 🎬 EXAMPLE WORKFLOWS
+##  EXAMPLE WORKFLOWS
 
 ### Quick Test (10 seconds)
 
@@ -230,17 +230,17 @@ python3 application/main.py --process \
 
 ---
 
-## 📌 REMEMBER
+##  REMEMBER
 
-1. ✅ **Core pipeline is complete** - All modules working
-2. ⏳ **GPU not yet active** - Need ROCm installation
-3. 🚀 **Performance improvement waiting** - 7-15x speedup available
-4. 📝 **Documentation complete** - README, QUICKSTART, PROJECT_SUMMARY
-5. 🔄 **Ready for Phase 2** - GUI development can begin anytime
+1.  **Core pipeline is complete** - All modules working
+2.  **GPU not yet active** - Need ROCm installation
+3.  **Performance improvement waiting** - 7-15x speedup available
+4.  **Documentation complete** - README, QUICKSTART, PROJECT_SUMMARY
+5.  **Ready for Phase 2** - GUI development can begin anytime
 
 ---
 
-## 🎯 YOUR NEXT MOVE
+## YOUR NEXT MOVE
 
 ```bash
 # 1. Navigate to project
@@ -256,8 +256,4 @@ python3 application/main.py --detect-hardware
 python3 application/main.py --process --video input.mp4 --output output.mp4
 ```
 
-**Estimated time**: 15 minutes for ROCm installation, then ready for real-time processing!
 
----
-
-_Good luck! This is going to be awesome! 🚀_

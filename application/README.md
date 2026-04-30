@@ -2,7 +2,7 @@
 
 Complete pipeline for generating intermediate video frames and upscaling to 4x resolution in real-time.
 
-## 🎯 Quick Start
+## Quick Start
 
 ### 1. Install Dependencies
 
@@ -44,7 +44,7 @@ python3 main.py --process \
   --codec mp4v
 ```
 
-## 🚀 Features
+##  Features
 
 ### Hardware Auto-Detection
 
@@ -67,7 +67,7 @@ Tests first 5 frames to estimate:
 - **Multiple codecs**: MP4V, H.264, H.265, VP9
 - **Flexible FPS**: Any target FPS achievable
 
-## 📋 Architecture
+##  Architecture
 
 ### Core Modules
 
@@ -85,7 +85,7 @@ Tests first 5 frames to estimate:
 | `normalization.py` | Frame normalization [0-255] ↔ [0.0-1.0] |
 | `padding.py`       | Reflection padding to multiple of 32    |
 
-## 🔧 Configuration
+##  Configuration
 
 Edit `config.py` to customize:
 
@@ -96,7 +96,7 @@ DEFAULT_TARGET_FPS = 60            # Default output FPS
 FRAME_PADDING_MULTIPLE = 32        # ONNX requirement
 ```
 
-## 🐛 GPU Setup
+##  GPU Setup
 
 ### AMD RDNA4 (9070XT) on Fedora
 
@@ -126,7 +126,7 @@ nvidia-smi
 python3 main.py --detect-hardware
 ```
 
-## 📊 Test Results
+##  Test Results
 
 Current test on **Fedora 9070XT (CPU fallback)**:
 
@@ -135,7 +135,7 @@ Current test on **Fedora 9070XT (CPU fallback)**:
 - CPU Mode: Fallback only, GPU recommended for real-time
 - Batch size detected: 8
 
-## 🎬 Pipeline Specifications
+##  Pipeline Specifications
 
 ### Frame Interpolation (ONNX Model)
 
@@ -153,7 +153,7 @@ Output: [B, 3, 4H, 4W] - 4x spatial resolution
 Process: Early upsampling strategy + pixel shuffling
 ```
 
-## 📝 CLI Options
+##  CLI Options
 
 ```
 --detect-hardware     Only detect GPU and exit
@@ -175,7 +175,7 @@ Process: Early upsampling strategy + pixel shuffling
 3. **Adjust FPS**: Lower target FPS increases feasibility
 4. **Test First**: Always run `--estimate` before `--process`
 
-## 📦 Models Used
+##  Models Used
 
 - **Frame Interpolator**: Deep Flow-Based Interpolation (ONNX, opset_version=16)
 - **Upscaler**: ESPCN 4x Spatial Super-Resolution (ONNX, opset_version=16)
@@ -186,14 +186,14 @@ Both models are optimized for:
 - Dynamic resolutions
 - CPU/GPU inference
 
-## 🔐 Next Steps
+##  Next Steps
 
 1. **Install ROCm** for GPU acceleration
 2. **Build installer** using PyInstaller
 3. **Create GUI** (PyQt6 recommended)
 4. **Package distribution** for Windows/macOS
 
-## 📞 Troubleshooting
+##  Troubleshooting
 
 ### GPU not detected
 
@@ -223,6 +223,4 @@ python3 main.py --detect-hardware
 python3 main.py --estimate --video input.mp4 --target-fps 30
 ```
 
-## 📄 License
 
-[Your License Here]

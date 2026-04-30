@@ -3,11 +3,14 @@ from torch.utils.data import Dataset
 from PIL import Image
 import torchvision.transforms as transforms
 import random
+import os
 
 class VimeoDataset(Dataset):
     def __init__(self, root, list_file, crop_size=(256, 256)):
         with open(list_file, 'r') as f:
-            self.samples = f.read().splitlines()
+            # ✅ THE FIX: This ignores empty lines at the bottom of the text file
+            self.samples = [line.strip() for line in f.read().splitlines() if line.strip()]
+            
         self.root = root
         self.crop_size = crop_size
 
