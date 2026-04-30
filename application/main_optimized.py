@@ -191,12 +191,23 @@ Examples:
         logger.info(f"✓ Upscaler: {upscaler_path}")
         
         # Default to CPU for stability; GPU requires explicit flag
-        providers = ['CPUExecutionProvider']
-        if args.use_gpu:
-            providers = ['MIGraphXExecutionProvider', 'CPUExecutionProvider']
-            logger.info("Trying MIGraphX GPU providers (may be unstable)...")
+        if args.cpu:
+            providers = ['CPUExecutionProvider']
+            logger.info("Forcing CPU ONNX inference")
+        elif args.use_gpu:
+            available = detector.available_providers
+            selected = [p for p in detector.get_providers() if p in available]
+            if selected and selected[0] != 'CPUExecutionProvider':
+                providers = selected
+                logger.info(f"Using detected GPU provider(s): {providers}")
+            else:
+                providers = ['CPUExecutionProvider']
+                logger.warning(
+                    'GPU provider requested but not available. Falling back to CPUExecutionProvider.'
+                )
         else:
-            logger.info(f"Using CPUExecutionProvider for stability")
+            providers = ['CPUExecutionProvider']
+            logger.info("Using CPUExecutionProvider for stability")
 
         model_loader = ONNXModelLoader(providers=providers)
         logger.info(f"Selected ONNX providers: {model_loader.providers}")
@@ -340,7 +351,8 @@ Examples:
                 traceback.print_exc()
 
             # Retry on CPU if the GPU provider failed
-            if 'MIGraphXExecutionProvider' in model_loader.providers and 'CPUExecutionProvider' in detector.available_providers:
+            gpu_providers = [p for p in model_loader.providers if p != 'CPUExecutionProvider']
+            if gpu_providers and 'CPUExecutionProvider' in detector.available_providers:
                 logger.warning("GPU processing failed. Retrying with CPUExecutionProvider...")
                 try:
                     cpu_loader = ONNXModelLoader(providers=['CPUExecutionProvider'])
